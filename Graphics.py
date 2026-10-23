@@ -38,6 +38,7 @@ class PyOHost:
         self.fullscreen = False
         self.dark_mode = True
         self.ready = False
+        self.last_mouse_send = 0.0
         self.port_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Not connected")
         self.build_connect_screen()
@@ -192,7 +193,8 @@ class PyOHost:
         self.build_connect_screen()
 
     def toggle_fullscreen(self, _event=None) -> None:
-        self.root.attributes("-fullscreen", not bool(self.root.attributes("-fullscreen")))
+        current = str(self.root.attributes("-fullscreen")).lower() in ("1", "true", "yes")
+        self.root.attributes("-fullscreen", not current)
 
     def toggle_theme(self) -> None:
         self.dark_mode = not self.dark_mode
@@ -211,7 +213,11 @@ class PyOHost:
         self.send({"type": "KEY", "key": event.keysym, "char": event.char, "state": event.state})
 
     def on_mouse_move(self, event) -> None:
-        self.send({"type": "MOUSE_MOVE", "x": event.x, "y": event.y})
+        # Avoid flooding the low-bandwidth serial link with every motion event.
+        now = time.monotonic()
+        if now - self.last_mouse_send >= 0.05:
+            self.last_mouse_send = now
+            self.send({"type": "MOUSE_MOVE", "x": event.x, "y": event.y})
 
     def on_mouse_click(self, event) -> None:
         self.send({"type": "MOUSE_CLICK", "x": event.x, "y": event.y, "button": 1})
