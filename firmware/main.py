@@ -27,7 +27,7 @@ HEIGHT = 24
 BAUD = 115200
 FRAME_DELAY_MS = 80
 
-uart = UART(0, baudrate=BAUD, rx=3, tx=1, timeout=20, timeout_char=20)
+uart = UART(0, baudrate=BAUD, rx=3, tx=1, timeout=20, timeout_char=1)
 
 # 3D cube vertices.
 VERTICES = (
