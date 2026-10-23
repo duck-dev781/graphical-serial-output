@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PyO serial graphics viewer: decode RGB565 hex frames from the ESP32.
+"""PyO serial graphics viewer: decode RGB565 hex or compact character frames from the ESP32.
 
 Install dependencies on antiX/Debian:
     sudo apt install python3-tk python3-serial
@@ -42,7 +42,7 @@ class SerialCubeViewer:
         self.last_frame_time = time.monotonic()
         self.fps = 0.0
 
-        root.title("PyO Live Graphics — ESP32 RGB565 Hex")
+        root.title("PyO Live Graphics — ESP32 Serial")
         root.configure(bg="#050810")
         root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -80,12 +80,22 @@ class SerialCubeViewer:
         b = (value & 0x1F) * 255 // 31
         return f"#{r:02x}{g:02x}{b:02x}"
 
+    @staticmethod
+    def decode_palette(value):
+        colors = ((3, 5, 12), (8, 20, 55), (0, 220, 245), (245, 35, 210),
+                  (255, 190, 20), (60, 100, 255), (255, 120, 20), (120, 50, 255),
+                  (255, 255, 255), (255, 35, 35), (40, 220, 80), (0, 150, 150),
+                  (255, 120, 180), (120, 120, 120), (130, 200, 255), (100, 0, 20))
+        r, g, b = colors[value]
+        return f"#{r:02x}{g:02x}{b:02x}"
+
     def read_serial(self):
         while not self.stop_event.is_set() and self.serial_conn:
             try:
                 header = self.serial_conn.readline().decode("ascii", "ignore").strip()
-                if not header.startswith("PYOFRAME "):
+                if not (header.startswith("PYOFRAME ") or header.startswith("PYOCHAR ")):
                     continue
+                mode = "char" if header.startswith("PYOCHAR ") else "hex"
                 parts = header.split()
                 if len(parts) != 4:
                     continue
@@ -97,14 +107,24 @@ class SerialCubeViewer:
                 valid = True
                 for _ in range(height):
                     row = self.serial_conn.readline().decode("ascii", "ignore").strip()
-                    if len(row) != width * 4:
-                        valid = False
-                        break
-                    try:
-                        pixels.extend(int(row[i:i + 4], 16) for i in range(0, len(row), 4))
-                    except ValueError:
-                        valid = False
-                        break
+                    if mode == "char":
+                        if len(row) != width:
+                            valid = False
+                            break
+                        try:
+                            pixels.extend("0123456789ABCDEF".index(ch) for ch in row)
+                        except ValueError:
+                            valid = False
+                            break
+                    else:
+                        if len(row) != width * 4:
+                            valid = False
+                            break
+                        try:
+                            pixels.extend(int(row[i:i + 4], 16) for i in range(0, len(row), 4))
+                        except ValueError:
+                            valid = False
+                            break
                 if not valid or len(pixels) != width * height:
                     continue
 
@@ -113,7 +133,7 @@ class SerialCubeViewer:
                         self.frames.get_nowait()
                 except queue.Empty:
                     pass
-                self.frames.put((width, height, frame_id, pixels))
+                self.frames.put((width, height, frame_id, pixels, mode))
             except Exception as exc:
                 if not self.stop_event.is_set():
                     self.root.after(0, lambda e=str(exc): self.status.config(text=f"Serial read error: {e}"))
@@ -121,7 +141,7 @@ class SerialCubeViewer:
 
     def show_latest_frame(self):
         try:
-            width, height, frame_id, pixels = self.frames.get_nowait()
+            width, height, frame_id, pixels, mode = self.frames.get_nowait()
             self.canvas.delete("all")
             canvas_w = max(1, self.canvas.winfo_width())
             canvas_h = max(1, self.canvas.winfo_height())
@@ -131,7 +151,7 @@ class SerialCubeViewer:
 
             for y in range(height):
                 for x in range(width):
-                    color = self.decode_rgb565(pixels[y * width + x])
+                    color = self.decode_palette(pixels[y * width + x]) if mode == "char" else self.decode_rgb565(pixels[y * width + x])
                     self.canvas.create_rectangle(
                         xoff + x * scale, yoff + y * scale,
                         xoff + (x + 1) * scale, yoff + (y + 1) * scale,
@@ -166,7 +186,7 @@ class SerialCubeViewer:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Display RGB565 hex frames received from PyO on serial.")
+    parser = argparse.ArgumentParser(description="Display RGB565 hex or compact character frames received from PyO on serial.")
     parser.add_argument("--port", default=DEFAULT_PORT, help="serial device (default: /dev/ttyUSB0)")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="serial baud rate (default: 115200)")
     args = parser.parse_args()
