@@ -8,7 +8,6 @@ Run:
     python3 graphics_serial_viewer.py
     python3 graphics_serial_viewer.py --port /dev/ttyUSB0
 
-The ESP32 firmware sends PYOFRAME headers and one ASCII RGB565 row per line.
 Press Q or Escape to quit. This viewer does not flash the ESP32.
 """
 
@@ -26,15 +25,16 @@ except ImportError:
     raise SystemExit("pySerial is missing. Install it with: sudo apt install python3-serial")
 
 DEFAULT_PORT = "/dev/ttyUSB0"
-BAUD = 115200
+DEFAULT_BAUD = 115200
 MAX_WIDTH = 160
 MAX_HEIGHT = 120
 
 
 class SerialCubeViewer:
-    def __init__(self, root, port):
+    def __init__(self, root, port, baud):
         self.root = root
         self.port = port
+        self.baud = baud
         self.serial_conn = None
         self.frames = queue.Queue(maxsize=1)
         self.stop_event = threading.Event()
@@ -53,14 +53,14 @@ class SerialCubeViewer:
                                bg="#050810", font=("monospace", 10))
         self.status.pack(fill="x", padx=10, pady=(4, 10))
 
-        self.root.bind("<Key>", self.on_key)
+        root.bind("<Key>", self.on_key)
         self.canvas.focus_set()
         self.connect()
         self.root.after(20, self.show_latest_frame)
 
     def connect(self):
         try:
-            self.serial_conn = serial.Serial(self.port, BAUD, timeout=1)
+            self.serial_conn = serial.Serial(self.port, self.baud, timeout=1)
         except Exception as exc:
             ports = ", ".join(p.device for p in list_ports.comports()) or "none found"
             messagebox.showerror(
@@ -70,7 +70,7 @@ class SerialCubeViewer:
             )
             self.status.config(text=f"Not connected: {self.port}")
             return
-        self.status.config(text=f"Connected to {self.port} at {BAUD} baud — waiting for ESP32 frames...")
+        self.status.config(text=f"Connected to {self.port} at {self.baud} baud — waiting for ESP32 frames...")
         threading.Thread(target=self.read_serial, daemon=True).start()
 
     @staticmethod
@@ -108,7 +108,6 @@ class SerialCubeViewer:
                 if not valid or len(pixels) != width * height:
                     continue
 
-                # Keep only the newest frame so the display doesn't lag behind.
                 try:
                     while True:
                         self.frames.get_nowait()
@@ -130,7 +129,6 @@ class SerialCubeViewer:
             xoff = (canvas_w - width * scale) // 2
             yoff = (canvas_h - height * scale) // 2
 
-            # Draw enlarged pixels from the received RGB565 hex frame.
             for y in range(height):
                 for x in range(width):
                     color = self.decode_rgb565(pixels[y * width + x])
@@ -170,15 +168,11 @@ class SerialCubeViewer:
 def main():
     parser = argparse.ArgumentParser(description="Display RGB565 hex frames received from PyO on serial.")
     parser.add_argument("--port", default=DEFAULT_PORT, help="serial device (default: /dev/ttyUSB0)")
-    parser.add_argument("--baud", type=int, default=BAUD, help="serial baud rate (default: 115200)")
+    parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="serial baud rate (default: 115200)")
     args = parser.parse_args()
 
-    # Keep the documented 115200 default, but allow explicit overrides.
-    global BAUD
-    BAUD = args.baud
-
     root = tk.Tk()
-    SerialCubeViewer(root, args.port)
+    SerialCubeViewer(root, args.port, args.baud)
     root.mainloop()
 
 
